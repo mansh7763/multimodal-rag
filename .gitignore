@@ -1,0 +1,12 @@
+.env
+.claude/
+__pycache__/
+*.pyc
+data/raw_html/
+data/chunks/
+data/images/
+.venv/
+venv/
+node_modules/
+.next/
+.vercel/
