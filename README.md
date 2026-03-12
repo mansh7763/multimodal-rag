@@ -11,19 +11,20 @@ app_port: 7860
 
 A multimodal Retrieval-Augmented Generation system over the [Hugging Face Learn](https://huggingface.co/learn) ecosystem. Ask questions about course content — text, code, and images — and get cited answers grounded in the official learning material.
 
-## Demo
+## Live Demo
 
-- **Frontend:** Deployed on Vercel
-- **Backend API:** Deployed on HuggingFace Spaces
+- **Frontend:** [multimodal-rag.vercel.app](https://multimodal-rag.vercel.app)
+- **Backend API:** [abhiyanta-multimodal-rag.hf.space](https://abhiyanta-multimodal-rag.hf.space)
+- **API Docs:** [abhiyanta-multimodal-rag.hf.space/docs](https://abhiyanta-multimodal-rag.hf.space/docs)
 
 ## Features
 
 - **Multimodal Search** — Dense retrieval over text and image embeddings using Qdrant
-- **Streaming Answers** — Real-time token streaming via Server-Sent Events (SSE)
-- **Source Citations** — Every answer links back to the exact course, chapter, and section
-- **Conversational Memory** — Follow-up questions are rewritten into standalone queries using conversation history
-- **Course Filtering** — Scope your search to a specific course
-- **LLM Fallback** — Gemini 2.5 Flash as primary, Groq Llama 3.3 70B as fallback
+- **Real-time Streaming** — Token-by-token answer streaming via Server-Sent Events (SSE)
+- **Numbered Citations** — Every claim is backed by short clickable references (e.g. [1], [2]) linking to the original course material
+- **Conversational Memory** — Follow-up questions are automatically rewritten into standalone queries using conversation history
+- **Course Filtering** — Scope your search to a specific course via filter pills
+- **LLM Fallback** — Gemini 2.5 Flash as primary, Groq Llama 3.3 70B as automatic fallback
 
 ## Courses Indexed
 
@@ -41,49 +42,85 @@ A multimodal Retrieval-Augmented Generation system over the [Hugging Face Learn]
 ## Architecture
 
 ```
-Scraper → Parser → Chunker → BGE + CLIP embeddings → Qdrant Cloud
-                                                         │
-User → Next.js Frontend → FastAPI Backend → Query Rewrite
-                                │
-                          Dense Search (text + image vectors)
-                                │
-                          Merge Results → Gemini 2.5 Flash → Streamed Answer with Citations
+┌─────────────────────── Ingestion Pipeline ───────────────────────┐
+│                                                                  │
+│  Scraper (GitHub) → Parser (Markdown) → Semantic Chunker         │
+│                                          │                       │
+│                               ┌──────────┴──────────┐           │
+│                               ▼                     ▼           │
+│                        BGE Embeddings         CLIP Embeddings    │
+│                        (text, 384d)          (images, 512d)      │
+│                               └──────────┬──────────┘           │
+│                                          ▼                       │
+│                                    Qdrant Cloud                  │
+│                              (single collection,                 │
+│                               named vectors)                     │
+└──────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────── Query Pipeline ───────────────────────────┐
+│                                                                  │
+│  User → Next.js Frontend (Vercel)                                │
+│              │                                                   │
+│              ▼                                                   │
+│         FastAPI Backend (HF Spaces)                              │
+│              │                                                   │
+│         Query Rewrite (conversation-aware)                       │
+│              │                                                   │
+│         Dense Search (BGE text + CLIP image vectors)             │
+│              │                                                   │
+│         Merge & Deduplicate Results                              │
+│              │                                                   │
+│         Gemini 2.5 Flash (or Groq fallback)                      │
+│              │                                                   │
+│         SSE Stream → Cited Answer with [1], [2] references       │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Tech Stack
 
-**Backend:**
-- Python 3.11+
-- FastAPI with SSE streaming
-- Qdrant Cloud (vector database)
-- Sentence-Transformers (`BAAI/bge-small-en-v1.5` for text, 384 dims)
-- CLIP (`openai/clip-vit-base-patch32` for images, 512 dims)
-- Google Gemini 2.5 Flash (primary LLM)
-- Groq Llama 3.3 70B (fallback LLM)
-
-**Frontend:**
-- Next.js 16 with TypeScript
-- Tailwind CSS v4
-- React 19
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS v4 |
+| Backend | FastAPI, SSE streaming (sse-starlette), Pydantic |
+| Vector DB | Qdrant Cloud (free tier, HNSW index) |
+| Text Embeddings | BAAI/bge-small-en-v1.5 (384 dims) |
+| Image Embeddings | openai/clip-vit-base-patch32 (512 dims) |
+| Primary LLM | Google Gemini 2.5 Flash |
+| Fallback LLM | Llama 3.3 70B via Groq API |
+| Frontend Hosting | Vercel |
+| Backend Hosting | HuggingFace Spaces (Docker) |
 
 ## Project Structure
 
 ```
 ├── scraper/          # Course content fetching from GitHub repos
-├── parser/           # Markdown chunking by heading structure
+├── parser/           # Markdown chunking by heading structure (h2/h3)
 ├── embedding/        # BGE (text) + CLIP (image) embedding logic
 ├── ingestion/        # Qdrant collection setup and data loading
-├── retrieval/        # Multimodal search and result merging
+├── retrieval/        # Dense search, merge, and ranking
 ├── generation/       # LLM prompting, streaming, fallback chain
 ├── memory/           # Conversation history and query rewriting
 ├── backend/          # FastAPI application
 ├── frontend/         # Next.js chat interface
+│   ├── app/
+│   │   ├── page.tsx              # Main chat page with SSE streaming
+│   │   ├── layout.tsx            # Root layout
+│   │   ├── globals.css           # Dark theme styles
+│   │   └── components/
+│   │       ├── ChatMessage.tsx   # Message rendering with markdown + citations
+│   │       ├── ChatInput.tsx     # Input with course filter pills
+│   │       └── Sidebar.tsx       # Session management
+│   ├── next.config.ts
+│   ├── vercel.json
+│   └── package.json
 ├── evaluation/       # Test set and metrics
 ├── data/             # Raw scraped content and processed chunks
 ├── config.py         # Centralized settings via pydantic-settings
 ├── run.py            # Uvicorn entry point
 ├── Dockerfile        # HuggingFace Spaces deployment
-└── requirements.txt  # Python dependencies
+├── requirements.txt  # Full Python dependencies
+└── requirements-deploy.txt  # Lightweight deploy dependencies (no scraping libs)
 ```
 
 ## Getting Started
@@ -92,9 +129,7 @@ User → Next.js Frontend → FastAPI Backend → Query Rewrite
 
 - Python 3.11+
 - Node.js 18+
-- Qdrant Cloud account (free tier)
-- Gemini API key
-- Groq API key
+- API keys: [Gemini](https://aistudio.google.com/apikey), [Groq](https://console.groq.com/keys), [Qdrant Cloud](https://cloud.qdrant.io/)
 
 ### 1. Clone the repo
 
@@ -103,7 +138,7 @@ git clone https://github.com/mansh7763/multimodal-rag.git
 cd multimodal-rag
 ```
 
-### 2. Set up environment
+### 2. Set up Python environment
 
 ```bash
 python -m venv venv
@@ -129,13 +164,13 @@ QDRANT_API_KEY=your_qdrant_key
 ### 4. Ingest data
 
 ```bash
-# Scrape courses
+# Scrape course content from GitHub repos
 python -m scraper.crawler
 
-# Parse and chunk
+# Parse markdown and chunk by headings
 python -m parser.chunker
 
-# Embed and load into Qdrant
+# Generate embeddings and load into Qdrant
 python -m ingestion.ingest
 ```
 
@@ -145,7 +180,7 @@ python -m ingestion.ingest
 python run.py
 ```
 
-Backend runs at `http://localhost:8000`. API docs at `http://localhost:8000/docs`.
+Backend runs at `http://localhost:8000`. Interactive API docs at `http://localhost:8000/docs`.
 
 ### 6. Run the frontend
 
@@ -161,17 +196,54 @@ Frontend runs at `http://localhost:3000`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/query` | Non-streaming query, returns full answer + sources |
-| POST | `/query/stream` | Streaming query via SSE |
-| GET | `/courses` | List indexed courses |
-| POST | `/session/{id}/clear` | Clear conversation history |
-| GET | `/health` | Health check with Qdrant status |
+| GET | `/` | API info |
+| POST | `/query` | Non-streaming query — returns full answer + sources |
+| POST | `/query/stream` | Streaming query via SSE — real-time token streaming |
+| GET | `/courses` | List all indexed courses |
+| POST | `/session/{id}/clear` | Clear conversation history for a session |
+| GET | `/health` | Health check with Qdrant connection status |
+
+### Example request
+
+```bash
+curl -X POST https://abhiyanta-multimodal-rag.hf.space/query/stream \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How does LoRA work?", "session_id": "test"}'
+```
 
 ## Deployment
 
-**Backend** is deployed on HuggingFace Spaces using Docker SDK.
+### Backend — HuggingFace Spaces
 
-**Frontend** is deployed on Vercel with `NEXT_PUBLIC_BACKEND_URL` pointing to the HF Spaces URL.
+The backend is deployed as a Docker Space on HuggingFace:
+
+1. Create a new Space at [huggingface.co/new-space](https://huggingface.co/new-space) with **Docker SDK** (Blank template)
+2. Add secrets in **Settings > Variables and Secrets**:
+   - `GEMINI_API_KEY`
+   - `GROQ_API_KEY`
+   - `QDRANT_URL`
+   - `QDRANT_API_KEY`
+3. Push code to the Space:
+   ```bash
+   git remote add hf https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE
+   git push hf master:main
+   ```
+
+### Frontend — Vercel
+
+The frontend is deployed on Vercel:
+
+1. Import the GitHub repo at [vercel.com/new](https://vercel.com/new)
+2. Set **Root Directory** to `frontend`
+3. Add environment variable:
+   - `NEXT_PUBLIC_BACKEND_URL` = `https://YOUR_USERNAME-YOUR_SPACE.hf.space`
+4. Deploy — Vercel auto-detects Next.js
+
+### After deployment
+
+- Backend API: `https://YOUR_USERNAME-YOUR_SPACE.hf.space`
+- Frontend: `https://your-project.vercel.app`
+- The HF Spaces free tier may have cold starts (~30s) after inactivity
 
 ## License
 
