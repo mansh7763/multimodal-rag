@@ -11,11 +11,7 @@ app_port: 7860
 
 A multimodal Retrieval-Augmented Generation system over the [Hugging Face Learn](https://huggingface.co/learn) ecosystem. Ask questions about course content — text, code, and images — and get cited answers grounded in the official learning material.
 
-## Live Demo
 
-- **Frontend:** [multimodal-rag.vercel.app](https://multimodal-rag.vercel.app)
-- **Backend API:** [abhiyanta-multimodal-rag.hf.space](https://abhiyanta-multimodal-rag.hf.space)
-- **API Docs:** [abhiyanta-multimodal-rag.hf.space/docs](https://abhiyanta-multimodal-rag.hf.space/docs)
 
 ## Features
 
