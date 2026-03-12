@@ -49,6 +49,17 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "name": "HuggingFace Course RAG API",
+        "version": "0.1.0",
+        "docs": "/docs",
+        "health": "/health",
+    }
+
+
 class QueryRequest(BaseModel):
     query: str
     session_id: str = "default"
