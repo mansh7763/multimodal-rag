@@ -114,62 +114,67 @@ export default function Home() {
       let rewrittenQuery: string | undefined;
       let answerTokens: string[] = [];
       let buffer = "";
+      let currentEventType = "token";
+      let currentDataLines: string[] = [];
 
-      // Parse SSE: collect full events separated by blank lines
+      const dispatchEvent = (eventType: string, data: string) => {
+        if (eventType === "sources") {
+          try {
+            sources = JSON.parse(data);
+          } catch {}
+        } else if (eventType === "rewrite") {
+          rewrittenQuery = data;
+        } else if (eventType === "token") {
+          answerTokens.push(data);
+          const assistantMsg: Message = {
+            role: "assistant",
+            content: answerTokens.join(""),
+            sources,
+            rewrittenQuery,
+          };
+          setSessions((prev) =>
+            prev.map((s) =>
+              s.id === sessionId
+                ? { ...s, messages: [...updatedMessages, assistantMsg] }
+                : s
+            )
+          );
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
+        // Normalize \r\n to \n
+        buffer = buffer.replace(/\r\n/g, "\n");
 
-        // SSE events are separated by double newlines
-        const parts = buffer.split("\n\n");
-        // Last part may be incomplete, keep it in buffer
-        buffer = parts.pop() || "";
+        // Process line by line per SSE spec
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // last segment may be incomplete
 
-        for (const eventBlock of parts) {
-          if (!eventBlock.trim()) continue;
-
-          const lines = eventBlock.split("\n");
-          let eventType = "token";
-          const dataLines: string[] = [];
-
-          for (const line of lines) {
-            if (line.startsWith("event: ")) {
-              eventType = line.slice(7).trim();
-            } else if (line.startsWith("data: ")) {
-              dataLines.push(line.slice(6));
-            } else if (line === "data:") {
-              dataLines.push("");
+        for (const line of lines) {
+          if (line === "") {
+            // Blank line = end of event
+            if (currentDataLines.length > 0) {
+              dispatchEvent(currentEventType, currentDataLines.join("\n"));
             }
-          }
-
-          if (dataLines.length === 0) continue;
-          const data = dataLines.join("\n");
-
-          if (eventType === "sources") {
-            try {
-              sources = JSON.parse(data);
-            } catch {}
-          } else if (eventType === "rewrite") {
-            rewrittenQuery = data;
-          } else if (eventType === "token") {
-            answerTokens.push(data);
-            const assistantMsg: Message = {
-              role: "assistant",
-              content: answerTokens.join(""),
-              sources,
-              rewrittenQuery,
-            };
-            setSessions((prev) =>
-              prev.map((s) =>
-                s.id === sessionId
-                  ? { ...s, messages: [...updatedMessages, assistantMsg] }
-                  : s
-              )
-            );
+            currentEventType = "token";
+            currentDataLines = [];
+          } else if (line.startsWith("event: ")) {
+            currentEventType = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            currentDataLines.push(line.slice(6));
+          } else if (line === "data:" || line === "data") {
+            currentDataLines.push("");
           }
         }
+      }
+
+      // Dispatch any remaining buffered event
+      if (currentDataLines.length > 0) {
+        dispatchEvent(currentEventType, currentDataLines.join("\n"));
       }
 
       // Final message
@@ -187,6 +192,7 @@ export default function Home() {
         )
       );
     } catch (error: unknown) {
+      console.error("Query error:", error);
       const errMsg =
         error instanceof Error ? error.message : "Something went wrong";
       const errorResponse: Message = {
